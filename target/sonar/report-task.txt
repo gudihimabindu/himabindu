@@ -1,0 +1,5 @@
+projectKey=com.journaldev.spring:SpringMVCHibernate
+serverUrl=http://localhost:9000
+dashboardUrl=http://localhost:9000/dashboard/index/com.journaldev.spring:SpringMVCHibernate
+ceTaskId=AW8ocMWhtCLk6zwkGxvL
+ceTaskUrl=http://localhost:9000/api/ce/task?id=AW8ocMWhtCLk6zwkGxvL
