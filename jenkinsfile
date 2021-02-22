@@ -1,20 +1,259 @@
-node(master){
+//WORK IN PROGRESS * FEW VALUES IN THE FILE ARE AWAITED
+@Library("atc-jenkins-shared-library")
+import com.bmw.atc.jenkins.steps.*
 
-  echo "GitHub BranhName ${env.BRANCH_NAME}"
-  echo "Jenkins Job Number ${env.BUILD_NUMBER}"
-  echo "Jenkins Node Name ${env.NODE_NAME}"
-  
-  echo "Jenkins Home ${env.JENKINS_HOME}"
-  echo "Jenkins URL ${env.JENKINS_URL}"
-  echo "JOB Name ${env.JOB_NAME}"
+def pipelineSteps = new PipelineSteps(this)
+def scmSteps = new SCMSteps(this)
+def projectName = pipelineSteps.multiBranchDisplayName()
 
-     triggers{
-   
-        cron('0 */2 * * *')   
-   }
+pipeline {
 
-    stage('SCM Checkout'){
-        git url: 'https://github.com/java-web-app.git',branch: 'master'
+  agent { label projectName }
+
+  options {
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '5'))
+  }
+
+  environment {
+    TSS_USER = credentials('ebba0e13-bbf7-47a1-b5b6-ad50d219213f')
+    GIT_CREDS = 'd7d090f6-e852-47f4-8304-384499d94e53'
+    HELM_GIT_CREDS = 'f4ba8030-0279-4807-97c3-9a67511be4c8'
+    REPO_URL = 'ssh://git@git.bmwgroup.net:7999/corelight/my-bmw-corelight-front-end.git'
+    HELM_REPO_URL = 'ssh://git@git.bmwgroup.net:7999/corelight/my-bmw-corelight-charts.git'
+    SHA_COMMIT_ID = ''
+    WORKDIR = ''
+    NEXUS_RAW_URL = 'https://oto-ci.bmwgroup.net/nexus/repository/corelight-site'
+    NEXUS_DOCKER_URL = "lpotonexus01.bmwgroup.net:16071/repository/corelight-docker"
+    PROXY_URL = "http://$TSS_USER@proxy.muc:8080"
+    AWS_ECR = "284443586465.dkr.ecr.ap-southeast-1.amazonaws.com"
+  }
+
+  stages {
+    
+    stage('SCM Checkout') {
+      
+      agent {
+        dockerfile {
+          filename 'dockerfile-frontend'
+          dir 'build'
+          label projectName
+          additionalBuildArgs "--build-arg http_proxy=$PROXY_URL --build-arg https_proxy=$PROXY_URL --build-arg no_proxy=.bmwgroup.net"
+        }
+      }
+      
+      steps {
+        script {
+          log.outputBanner('Checkout from corelight helm charts repository for package.json')
+          
+          dir('my-bmw-corelight-charts') {
+            scmSteps.cloneRepository(env.HELM_REPO_URL, 'my-bmw-corelight-front-end', env.HELM_GIT_CREDS)
+            sh 'ls'
+          }
+
+          log.outputBanner("Checkout from my-bmw-corelight-front-end repository")
+
+          dir('my-bmw-corelight-front-end') {
+            def checkout = scmSteps.cloneRepository(env.REPO_URL, 'master', env.GIT_CREDS)
+            sh 'ls -la'
+            SHA_COMMIT_ID = "${checkout.GIT_COMMIT}"
+            echo "The commit id is $SHA_COMMIT_ID"
+          }
+        }
+      }
     }
     
+    stage('Build') {
+
+      agent {
+        dockerfile {
+          filename 'dockerfile-frontend'
+          dir 'build'
+          label projectName
+          additionalBuildArgs "--build-arg http_proxy=$PROXY_URL --build-arg https_proxy=$PROXY_URL --build-arg no_proxy=.bmwgroup.net"
+        }
+      }
+
+      steps {
+        script {
+          log.outputBanner("Building frontend")
+          sh 'npm -v'
+          sh 'node -v'   
+             
+          dir('my-bmw-corelight-front-end') {
+            sh 'rm -rf yarn.lock'
+            sh 'rm -rf node_modules'
+            sh 'rm -rf *.tar.gz'
+            sh 'yarn cache clean'
+            sh 'cp ../my-bmw-corelight-charts/package.json .'
+            WORKDIR = '$PWD'
+            sh "curl -X GET -u $TSS_USER $NEXUS_RAW_URL/node-headers/node-v10.23.2-headers.tar.gz -O"
+            sh 'yarn config set strict-ssl false'
+            sh 'yarn config set registry https://lpnexus01.bmwgroup.net:8088/repository/bmw_npm_repositories/'
+            sh "yarn config set tarball $WORKDIR/node-v10.23.2-headers.tar.gz"
+            sh 'yarn config list'
+            sh 'ls -als'
+            sh 'yarn'
+            sh 'yarn cache clean'
+            sh 'ls node_modules'
+            sh 'yarn build'
+            sh 'ls -la'
+          }
+        }
+      }
     }
+    
+    stage('Push Tarball to Nexus') {
+      
+      agent {
+        dockerfile {
+          filename 'dockerfile-frontend'
+          dir 'build'
+          label projectName
+          additionalBuildArgs "--build-arg http_proxy=$PROXY_URL --build-arg https_proxy=$PROXY_URL --build-arg no_proxy=.bmwgroup.net"
+        }
+      }
+
+      steps {
+        script{
+          log.outputBanner("Creating tarball and pushing to Nexus")
+
+          dir('my-bmw-corelight-front-end') {
+            sh 'ls -la'
+            sh "tar czvf my-bmw-corelight-front-end_${SHA_COMMIT_ID}.tar.gz dist"
+            sh 'ls'
+            sh "curl --noproxy '*' -u $TSS_USER --upload-file my-bmw-corelight-front-end_${SHA_COMMIT_ID}.tar.gz ${NEXUS_RAW_URL}/frontend/"
+          
+          }
+        }
+      }
+    }
+
+    stage('Build and tag Docker Images') {
+      steps {
+        script{
+          log.outputBanner('Building and tagging docker images')
+          dir('my-bmw-crm-corelight-front-end') {
+          
+          sh "rm -rf *.tar.gz"
+          sh "rm -rf *.tar"
+          sh "curl -X GET -u $TSS_USER $NEXUS_RAW_URL/frontend/my-bmw-corelight-front-end_${SHA_COMMIT_ID}.tar.gz -O"
+          sh 'ls -la'
+          sh "tar xvzf my-bmw-corelight-front-end_${SHA_COMMIT_ID}.tar.gz"
+
+          sh 'ls -al'
+          sh "docker build --build-arg http_proxy=$PROXY_URL --build-arg https_proxy=$PROXY_URL -f ../build/dockerfile-nginx -t my-bmw-corelight-front-end ."
+              
+          sh "docker tag my-bmw-corelight-front-end $NEXUS_DOCKER_URL/my-bmw-corelight-front-end:latest"
+          sh "docker tag my-bmw-corelight-front-end $NEXUS_DOCKER_URL/my-bmw-corelight-front-end:${SHA_COMMIT_ID}"
+
+          sh "docker tag my-bmw-corelight-front-end ${AWS_ECR}/oneplatform/corelight/frontend:latest"
+          sh "docker tag my-bmw-corelight-front-end ${AWS_ECR}/oneplatform/corelight/frontend:${SHA_COMMIT_ID}"
+          
+          sh 'docker images'
+          }
+          }
+        }
+      }
+/***
+      stage('Pushing docker images to Nexus') {
+
+     steps {
+        script {
+          log.outputBanner('Pushing docker images to Nexus')
+
+          dir('my-bmw-corelight-back-end') {
+            sh 'docker images'
+
+            sh "docker login -u ${TSS_UN} -p ${TSS_PW} lpitonexus01.bmwgroup.net:16101"
+
+            sh "docker push $NEXUS_DOCKER_URL/my-bmw-corelight-front-end:latest"
+            sh "docker push $NEXUS_DOCKER_URL/my-bmw-corelight-front-end:${SHA_COMMIT_ID}"
+
+          }
+        }
+      }
+    }
+    ***/
+    stage('Push to ECR') {
+      environment {
+        http_proxy = "http://$TSS_USER@proxy.muc:8080"
+        https_proxy = "http://$TSS_USER@proxy.muc:8080"
+        }
+
+      steps {
+        script {
+          log.outputBanner("Pushing Docker Image to ECR")
+          
+          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'oneplatform_corelight_ciops']]) {
+            sh "docker run -e https_proxy -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY --rm -t amazon/aws-cli:latest ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin 284443586465.dkr.ecr.ap-southeast-1.amazonaws.com"
+            sh "docker push ${AWS_ECR}/oneplatform/corelight/frontend:latest"
+            sh "docker push ${AWS_ECR}/oneplatform/corelight/frontend:${SHA_COMMIT_ID}"
+          }
+
+          sh "docker rmi ${AWS_ECR}/oneplatform/corelight/frontend:latest"
+          sh "docker rmi ${AWS_ECR}/oneplatform/corelight/frontend:${SHA_COMMIT_ID}"
+        }
+      }
+    }
+ 
+    stage('Deployment to EKS') {
+
+      environment {
+        http_proxy = "http://$TSS_USER@proxy.muc:8080"
+        https_proxy = "http://$TSS_USER@proxy.muc:8080"
+      }
+  
+      steps {
+        script {
+          log.outputBanner('Deploy Corelight frontend to One Platform Sandbox')
+
+          sh 'docker volume create kub-config'
+          sh 'docker volume ls'
+          
+          echo 'Cloning helm charts'
+          dir('my-bmw-corelight-charts') {
+            scmSteps.cloneRepository(env.HELM_REPO_URL, 'my-bmw-corelight-front-end', env.HELM_GIT_CREDS)
+            sh 'ls'
+          }
+            
+          withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'oneplatform_corelight_ciops']]) {
+            
+            sh 'docker run --rm -t -e https_proxy -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION=ap-southeast-1 -v kub-config:/root/.kube amazon/aws-cli:latest eks update-kubeconfig --region ap-southeast-1 --name BMW_OnePlatform_EKS_NonProd --alias BMW_OnePlatform_EKS_NonProd'
+            
+            sh 'docker run --rm -t -v kub-config:/root/.kube alpine/k8s:1.18.2 kubectl config set-credentials arn:aws:eks:ap-southeast-1:284443586465:cluster/BMW_OnePlatform_EKS_NonProd \
+              --exec-api-version client.authentication.k8s.io/v1alpha1 --exec-command aws-iam-authenticator --exec-arg "token" --exec-arg "-i" --exec-arg BMW_OnePlatform_EKS_NonProd'
+
+            sh "docker run --rm -t -e https_proxy -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION=ap-southeast-1 -v kub-config:/root/.kube -v /home/corelight/jenkins-workspace/workspace/coreelight-90-corelight-frontend_dev@2/my-bmw-corelight-charts:/home/corelight/my-bmw-corelight-charts \
+              alpine/k8s:1.18.2 helm upgrade -n corelight-svc-sandbox -i --set image.tag=${SHA_COMMIT_ID} -f /home/corelight/lmy-bmw-corelight-charts/values.yaml --debug my-bmw-corelight-front-end /home/corelight/my-bmw-corelight-charts/my-bmw-corelight-front-end"
+
+            sh 'docker volume rm kub-config'
+
+
+          }
+        }
+      }
+    }   
+
+  }
+
+  post {
+    success {
+      script {
+        log.outputBanner("Sending notification")
+        currentBuild.result = "SUCCESS"
+      }
+    }
+    failure {
+      script {
+        log.outputBanner("Sending notification to culprits")
+        currentBuild.result = "FAILURE"
+      }
+    }
+    unstable {
+      script {
+        log.outputBanner("Sending notification")
+        currentBuild.result = "UNSTABLE"
+      }
+    }
+  }
