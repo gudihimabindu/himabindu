@@ -5,7 +5,7 @@ node('slave1')
 
 
  
- //echo "GitHub BranhName ${env.BRANCH_NAME}"
+  echo "GitHub BranchName ${env.BRANCH_NAME}"
   echo "Jenkins Job Number ${env.BUILD_NUMBER}"
   echo "Jenkins Node Name ${env.NODE_NAME}"
   
