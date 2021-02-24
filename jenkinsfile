@@ -1,18 +1,34 @@
 
-  
-node('slave1')
-{
+ pipeline {
+    agent any
 
-
- 
-  echo "GitHub BranchName ${env.BRANCH_NAME}"
-  echo "Jenkins Job Number ${env.BUILD_NUMBER}"
-  echo "Jenkins Node Name ${env.NODE_NAME}"
+  properties([buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '2', daysToKeepStr: '', numToKeepStr: '2')), pipelineTriggers([pollSCM('* * * * *')])])
+   environment {
+    APP_NAME = 'corelight ci&cd'
+    BUILD_NUMBER = "${env.BUILD_NUMBER}"
+    }
+    
+  parameters {
+    string(defaultValue: "develop", description: 'Branch Specifier', name: 'SPECIFIER')
+    booleanParam(defaultValue: false, description: 'Deploy to QA Environment ?', name: 'DEPLOY_QA')
+    booleanParam(defaultValue: false, description: 'Deploy to UAT Environment ?', name: 'DEPLOY_UAT')
+    booleanParam(defaultValue: false, description: 'Deploy to PROD Environment ?', name: 'DEPLOY_PROD')
+  }
   
-  echo "Jenkins Home ${env.JENKINS_HOME}"
-  echo "Jenkins URL ${env.JENKINS_URL}"
-  echo "JOB Name ${env.JOB_NAME}"
- 
+  stages {
+    stage("Initialize") {
+        steps {
+            script {
+                notifyBuild('STARTED')
+                echo "${BUILD_NUMBER} - ${env.BUILD_ID} on ${env.JENKINS_URL}"
+                echo "Branch Specifier :: ${params.SPECIFIER}"
+                echo "Deploy to QA? :: ${params.DEPLOY_QA}"
+                echo "Deploy to UAT? :: ${params.DEPLOY_UAT}"
+                echo "Deploy to PROD? :: ${params.DEPLOY_PROD}"
+                sh 'rm -rf target/universal/*.zip'
+            }
+        }
+    }
 
 stage('CheckoutCode')
 {
