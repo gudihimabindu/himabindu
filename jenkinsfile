@@ -6,9 +6,12 @@ pipeline{
    
         cron('0 */2 * * *')   
    }
+   
+  Stages{ 
 
     stage('SCM Checkout'){
         git url: 'https://github.com/gudihimabindu/himabindu.git',branch: 'master'
     }
     
+  }
   }
