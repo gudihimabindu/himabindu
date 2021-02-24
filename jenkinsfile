@@ -2,10 +2,15 @@
  pipeline {
     agent any
 
-  properties([buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '2', daysToKeepStr: '', numToKeepStr: '2')), pipelineTriggers([pollSCM('* * * * *')])])
+  options {
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '5'))
+  }
    environment {
     APP_NAME = 'corelight ci&cd'
-    BUILD_NUMBER = "${env.BUILD_NUMBER}"
+    BUILD_NUMBER = '${env.BUILD_NUMBER}'
+    GIT_URL = 'https://github.com/gudihimabindu/himabindu.git'
+    GIT_CRED_ID =  '62fad565-6f44-4f5f-a7c1-62297b0c73bb'
     }
     
   parameters {
@@ -14,9 +19,8 @@
     booleanParam(defaultValue: false, description: 'Deploy to UAT Environment ?', name: 'DEPLOY_UAT')
     booleanParam(defaultValue: false, description: 'Deploy to PROD Environment ?', name: 'DEPLOY_PROD')
   }
-  
-  stages {
-    stage("Initialize") {
+stages { 
+ stage("Initialize") {
         steps {
             script {
                 notifyBuild('STARTED')
@@ -30,11 +34,11 @@
         }
     }
 
-stage('CheckoutCode')
-{
-git branch: 'master', credentialsId: '62fad565-6f44-4f5f-a7c1-62297b0c73bb', url: 'https://github.com/gudihimabindu/himabindu.git'
+stage('Checkout') {
+    steps {
+        git branch: "${params.SPECIFIER}", url: "${GIT_URL}"
+    }
 }
 
 }
-
 }
