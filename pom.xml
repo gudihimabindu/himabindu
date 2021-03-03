@@ -18,37 +18,9 @@
 		<sonar.password>admin</sonar.password>
 
 	</properties>
-	<project …>
 
-   <distributionManagement>
 
-        <snapshot>
-
-          <id>snapshots</id>
-
-        <url>http://hostname:8081/repository/maven-snapshots/</url>
-
-      </snapshot>
-
-   </distributionManagement>
-
-</project>
-
-<project …>
-
-     <distributionManagement>
-
-          <releases>
-
-              <id>release</id>
-
-			<url>http://http://localhost:8081/repository/release/<url>
-
-          </releases>
-
-     </distributionManagement>
-
-</project>``
+     
 
 	<dependencies>
 		<!-- Spring -->
